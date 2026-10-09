@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import platform
+import time
 import uuid
 import xmlrpc.client
 from dataclasses import dataclass, field
@@ -120,7 +121,7 @@ def _strip_quotes(s: str) -> str:
 def login(http: HttpClient, login_uri: str, username: str, password: str,
           start: str = "last", agree_to_tos: bool = False,
           mfa_prompt: Callable[[str], str] | None = None,
-          mfa_store: MfaStore | None = None) -> Session:
+          mfa_store: MfaStore | None = None, presence_retry_delay: float = 10.0) -> Session:
     first, last = split_username(username)
     plat, plat_version = _platform()
     mfa_store = mfa_store or MfaStore()
@@ -149,7 +150,8 @@ def login(http: HttpClient, login_uri: str, username: str, password: str,
         "options": ["inventory-root", "inventory-skeleton"],
     }
 
-    for _attempt in range(3):
+    presence_retries = 2
+    for _attempt in range(6):
         body = xmlrpc.client.dumps((params,), "login_to_simulator").encode("utf-8")
         try:
             raw, _ = http.request("POST", login_uri, body, {"Content-Type": "text/xml"})
@@ -170,11 +172,18 @@ def login(http: HttpClient, login_uri: str, username: str, password: str,
         if reason == "mfa_challenge" and mfa_prompt:
             params["token"] = "".join(mfa_prompt(message or "Enter your MFA token:").split())
             continue
+        if reason == "presence" and presence_retries:
+            # A previous session (e.g. an interrupted run) is still around. The
+            # rejected attempt makes the grid clean it up; try again shortly.
+            presence_retries -= 1
+            log.warning("account still appears to be logged in; retrying in %.0fs", presence_retry_delay)
+            time.sleep(presence_retry_delay)
+            continue
         if reason in ("tos", "critical") and not agree_to_tos:
             message += ("\n\nRe-run with --agree-to-tos after reading the new terms "
                         "(e.g. by logging in once with the official viewer).")
         raise LoginError(reason, message)
-    raise LoginError("mfa_challenge", "MFA token was not accepted")
+    raise LoginError(reason, message)
 
 
 def _session_from_response(login_uri: str, r: dict) -> Session:

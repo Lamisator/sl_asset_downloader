@@ -54,6 +54,7 @@ class FakeGrid:
             NOTES: [_item("Todo", NOTES, 7, self.note_asset)],
         }
         self.http_requests = []
+        self.reject_presence = 0
         self.logged_out = threading.Event()
         self.handshake_replied = threading.Event()
 
@@ -94,7 +95,11 @@ class FakeGrid:
                 if self.path == "/login":
                     (params,), _ = xmlrpc.client.loads(body)
                     assert params["passwd"].startswith("$1$")
-                    resp = grid.login_response(params)
+                    if grid.reject_presence:
+                        grid.reject_presence -= 1
+                        resp = {"login": "false", "reason": "presence", "message": "already logged in"}
+                    else:
+                        resp = grid.login_response(params)
                     self._send(xmlrpc.client.dumps((resp,), methodresponse=True).encode(), "text/xml")
                 elif self.path == "/seed":
                     names = llsd.parse_xml(body)
@@ -238,6 +243,14 @@ def test_notecards_over_udp_and_sounds(grid, tmp_path):
     out = tmp_path / "out"
     assert (out / "Notecards/Todo.txt").read_text() == NOTE_TEXT
     assert (out / "Textures/Sub/my sound.ogg").read_bytes() == b"OggS fake"
+
+
+def test_retries_when_still_logged_in(grid, tmp_path, monkeypatch):
+    from sl_asset_downloader import login
+    monkeypatch.setattr(login.time, "sleep", lambda s: None)
+    grid.reject_presence = 1
+    assert run(grid, tmp_path, "--dry-run") == 0
+    assert grid.http_requests.count("/login") == 2
 
 
 def test_unknown_folder_is_an_error(grid, tmp_path, capsys):

@@ -83,6 +83,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _count(n: int, kind: str) -> str:
+    singular = {"bodypart": "body part"}.get(kind, kind)
+    plural = {"clothing": "clothing items", "bodypart": "body parts"}.get(kind, kind + "s")
+    return f"{n} {singular if n == 1 else plural}"
+
+
 def _login_uri(grid: str) -> str:
     return GRIDS.get(grid.lower(), grid)
 
@@ -176,7 +182,7 @@ def cmd_download(args) -> int:
         allowed = [i for i in selected if may_export(i, session.agent_id)]
         not_allowed = len(selected) - len(allowed)
         counts = Counter(assets.KINDS_BY_TYPE[i.asset_type].name for i in allowed)
-        summary = ", ".join(f"{n} {k}{'s' if n != 1 else ''}" for k, n in counts.items()) or "nothing"
+        summary = ", ".join(_count(n, k) for k, n in counts.items()) or "nothing"
         print(f"Found {summary} to download.", file=sys.stderr)
         if not_allowed:
             print(f"Skipping {not_allowed} item(s) you did not create and do not have full "

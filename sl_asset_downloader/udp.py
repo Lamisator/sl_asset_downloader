@@ -123,6 +123,7 @@ class Circuit:
         self._lock = threading.Lock()
         self._unacked: dict[int, list] = {}  # seq -> [packet, last_sent, resends]
         self._pending_acks: list[int] = []
+        self._gave_up: set[int] = set()
         self._handlers: dict[tuple[str, int], list[Handler]] = {}
         self._stop = threading.Event()
         self.closed = threading.Event()
@@ -158,7 +159,7 @@ class Circuit:
         if not self.movement_complete.wait(timeout):
             log.warning("region did not confirm arrival within %.0fs; continuing anyway", timeout)
 
-    def send(self, msg: tuple[str, int], body: bytes, reliable: bool = False) -> None:
+    def send(self, msg: tuple[str, int], body: bytes, reliable: bool = False) -> int:
         if self.closed.is_set():
             raise CircuitClosed(self.close_reason)
         with self._lock:
@@ -169,14 +170,32 @@ class Circuit:
             if reliable:
                 self._unacked[seq] = [packet, time.monotonic(), 0]
         self.sock.sendto(packet, self.addr)
+        return seq
 
-    def logout(self, timeout: float = 10.0) -> None:
+    def is_acked(self, seq: int) -> bool:
+        with self._lock:
+            return seq not in self._unacked and seq not in self._gave_up
+
+    def logout(self, timeout: float = 5.0) -> None:
         if not self.closed.is_set():
             s = self.session
             try:
-                self.send(MSG_LOGOUT_REQUEST, s.agent_id.bytes + s.session_id.bytes, reliable=True)
-                if not self.logout_reply.wait(timeout):
-                    log.warning("no logout reply from region; the session will time out on its own")
+                seq = self.send(MSG_LOGOUT_REQUEST, s.agent_id.bytes + s.session_id.bytes, reliable=True)
+                deadline = time.monotonic() + timeout
+                acked_at = None
+                while not self.logout_reply.wait(0.1):
+                    now = time.monotonic()
+                    if acked_at is None and self.is_acked(seq):
+                        acked_at = now
+                    # The region acked the request; some (e.g. OpenSim) close
+                    # the circuit without ever sending LogoutReply.
+                    if acked_at is not None and now - acked_at > 1.0:
+                        break
+                    if now > deadline:
+                        # Seen with OpenSim, which closes the circuit before its
+                        # reply goes out. The logout itself still happens.
+                        log.info("region did not confirm the logout")
+                        break
             except OSError as e:
                 log.warning("logout failed: %s", e)
         self.close()
@@ -272,6 +291,7 @@ class Circuit:
                     if entry[2] >= MAX_RESENDS:
                         log.debug("giving up on reliable packet %d", seq)
                         del self._unacked[seq]
+                        self._gave_up.add(seq)
                         continue
                     entry[0] = bytes([entry[0][0] | FLAG_RESENT]) + entry[0][1:]
                     entry[1] = now
