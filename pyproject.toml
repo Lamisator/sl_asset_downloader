@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sl-asset-downloader"
+dynamic = ["version"]
+description = "Command line tool to download textures, photos, sounds, notecards and more from a Second Life inventory"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["Pillow>=9.1"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+sl-asset-downloader = "sl_asset_downloader.cli:main"
+
+[tool.setuptools]
+packages = ["sl_asset_downloader"]
+
+[tool.setuptools.dynamic]
+version = {attr = "sl_asset_downloader.__version__"}
