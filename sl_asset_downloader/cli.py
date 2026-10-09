@@ -213,4 +213,7 @@ def main(argv: list[str] | None = None) -> int:
         return 130
     except (RuntimeError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
+        if "CERTIFICATE_VERIFY_FAILED" in str(e):
+            print("hint: pass --ca-bundle with a CA bundle that trusts the grid's "
+                  "certificates, or --insecure to skip verification", file=sys.stderr)
         return 1

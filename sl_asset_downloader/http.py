@@ -63,6 +63,8 @@ class HttpClient:
                     continue
                 raise HttpError(e.code, url, payload) from None
             except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+                if isinstance(getattr(e, "reason", None), ssl.SSLError):
+                    raise
                 if attempt < self.retries:
                     log.debug("network error %s on %s, retrying in %.1fs", e, url.split("?")[0], delay)
                     time.sleep(delay)

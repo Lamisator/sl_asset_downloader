@@ -166,7 +166,7 @@ def login(http: HttpClient, login_uri: str, username: str, password: str,
             return _session_from_response(login_uri, resp)
 
         reason = resp.get("reason", "")
-        message = resp.get("message", "")
+        message = resp.get("message", "") or f"unexpected login response (login={resp.get('login')!r})"
         if reason == "mfa_challenge" and mfa_prompt:
             params["token"] = "".join(mfa_prompt(message or "Enter your MFA token:").split())
             continue

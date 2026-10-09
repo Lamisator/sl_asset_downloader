@@ -219,7 +219,8 @@ class Circuit:
         while not self._stop.is_set():
             try:
                 data, addr = self.sock.recvfrom(65536)
-            except socket.timeout:
+            except (socket.timeout, ConnectionResetError):
+                # Windows reports ICMP "port unreachable" as a reset on UDP sockets
                 continue
             except OSError:
                 break
