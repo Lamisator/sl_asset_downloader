@@ -50,7 +50,8 @@ class FakeGrid:
             PHOTOS: [_item("Snapshot", PHOTOS, 0, red), _item("Snapshot", PHOTOS, 0, green)],
             TEXTURES: [_item("brick/wall", TEXTURES, 0, blue),
                        _item("Restricted", TEXTURES, 0, secret, creator=STRANGER, mask=0x2000)],
-            SUB: [_item("my sound", SUB, 1, uuid.uuid4())],
+            SUB: [_item("my sound", SUB, 1, uuid.uuid4()),
+                  _item("Stray note", SUB, 7, self.note_asset)],
             NOTES: [_item("Todo", NOTES, 7, self.note_asset)],
         }
         self.http_requests = []
@@ -243,6 +244,27 @@ def test_notecards_over_udp_and_sounds(grid, tmp_path):
     out = tmp_path / "out"
     assert (out / "Notecards/Todo.txt").read_text() == NOTE_TEXT
     assert (out / "Textures/Sub/my sound.ogg").read_bytes() == b"OggS fake"
+
+
+def test_notecards_option_defaults_to_notecards_folder(grid, tmp_path):
+    assert run(grid, tmp_path, "--notecards") == 0
+    out = tmp_path / "out"
+    assert (out / "Notecards/Todo.txt").read_text() == NOTE_TEXT
+    assert (out / "Textures/brick_wall.png").exists()   # the defaults still apply
+    assert not (out / "Textures/Sub/Stray note.txt").exists()  # outside Notecards
+
+
+def test_notecard_folder_overrides_notecards_folder(grid, tmp_path):
+    assert run(grid, tmp_path, "--notecards", "--notecard-folder", "Textures", "-t", "sound") == 0
+    out = tmp_path / "out"
+    assert not (out / "Notecards").exists()
+    assert (out / "Textures/Sub/Stray note.txt").read_text() == NOTE_TEXT
+    assert (out / "Textures/Sub/my sound.ogg").exists()
+
+
+def test_notecard_folder_requires_notecards(grid, tmp_path):
+    with pytest.raises(SystemExit):
+        run(grid, tmp_path, "--notecard-folder", "Textures")
 
 
 def test_retries_when_still_logged_in(grid, tmp_path, monkeypatch):

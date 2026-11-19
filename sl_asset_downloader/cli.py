@@ -16,7 +16,7 @@ from typing import Iterator
 from . import __version__, assets
 from .downloader import Downloader, may_export
 from .http import HttpClient, HttpError
-from .inventory import AT_LINK, FOLDER_SHORTCUTS, Inventory
+from .inventory import AT_LINK, FOLDER_SHORTCUTS, Inventory, Item
 from .login import GRIDS, LoginError, Session, login
 from .udp import Circuit, TransferManager
 
@@ -25,6 +25,7 @@ log = logging.getLogger("sl_asset_downloader")
 CAPS = ["FetchInventoryDescendents2", "FetchInventory2", "ViewerAsset", "GetTexture"]
 DEFAULT_FOLDERS = ["@photos", "@textures"]
 DEFAULT_TYPES = ["texture"]
+DEFAULT_NOTECARD_FOLDERS = ["@notecards"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -67,6 +68,13 @@ def build_parser() -> argparse.ArgumentParser:
                     choices=[*assets.KINDS, "all"],
                     help=f"asset type to download; repeatable. One of: {', '.join(assets.KINDS)}, all. "
                          f"Default: {' '.join(DEFAULT_TYPES)}")
+    dl.add_argument("--notecards", action="store_true",
+                    help="also download notecards, as .txt files. They are taken from the Notecards "
+                         "folder (and its subfolders) only, unless --notecard-folder is given")
+    dl.add_argument("--notecard-folder", action="append", dest="notecard_folders", metavar="FOLDER",
+                    help="folder to take notecards from with --notecards, instead of the Notecards "
+                         "folder; repeatable. Accepts the same values as --folder. "
+                         f"Default: {' '.join(DEFAULT_NOTECARD_FOLDERS)}")
     dl.add_argument("-o", "--output", type=Path, default=Path("sl-downloads"),
                     help="output directory (default: ./sl-downloads)")
     dl.add_argument("--format", choices=list(assets.IMAGE_FORMATS), default="png",
@@ -152,35 +160,53 @@ def cmd_folders(args) -> int:
     return 0
 
 
+def _collect_items(inv: Inventory, folder_specs: list[str], args) -> list[Item]:
+    """Resolve the folder specs and list the items in them (following links if asked).
+
+    Raises LookupError if a folder can't be found.
+    """
+    roots = []
+    for spec in folder_specs:
+        folder = inv.resolve(spec)
+        print(f"Folder: {'/'.join(inv.path_of(folder.folder_id)) or folder.name}", file=sys.stderr)
+        roots.append(folder.folder_id)
+
+    print("Reading inventory ...", file=sys.stderr)
+    items = inv.fetch_items(roots, recursive=args.recursive)
+    links = [i for i in items if i.asset_type == AT_LINK]
+    items = [i for i in items if i.asset_type != AT_LINK]
+    if args.follow_links and links:
+        have = {i.item_id for i in items}
+        items += [t for t in inv.resolve_links(links) if t.item_id not in have]
+    return items
+
+
 def cmd_download(args) -> int:
+    if args.notecard_folders and not args.notecards:
+        raise SystemExit("error: --notecard-folder needs --notecards")
     folder_specs = args.folders or DEFAULT_FOLDERS
     type_names = args.types or DEFAULT_TYPES
     kinds = list(assets.KINDS.values()) if "all" in type_names else [assets.KINDS[t] for t in type_names]
     wanted_types = {k.asset_type for k in kinds}
+    notecard_kind = assets.KINDS["notecard"]
 
     with connected(args) as (session, http, caps, circuit):
         inv = Inventory(session, http, caps)
-        roots = []
-        for spec in folder_specs:
-            try:
-                folder = inv.resolve(spec)
-            except LookupError as e:
-                print(f"error: {e}", file=sys.stderr)
-                return 2
-            print(f"Folder: {'/'.join(inv.path_of(folder.folder_id)) or folder.name}", file=sys.stderr)
-            roots.append(folder.folder_id)
+        try:
+            items = [i for i in _collect_items(inv, folder_specs, args)
+                     if i.asset_type in wanted_types]
+            if args.notecards:
+                have = {i.item_id for i in items}
+                notecard_specs = args.notecard_folders or DEFAULT_NOTECARD_FOLDERS
+                items += [i for i in _collect_items(inv, notecard_specs, args)
+                          if i.asset_type == notecard_kind.asset_type and i.item_id not in have]
+                kinds.append(notecard_kind)
+        except LookupError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
 
-        print("Reading inventory ...", file=sys.stderr)
-        items = inv.fetch_items(roots, recursive=args.recursive)
-        links = [i for i in items if i.asset_type == AT_LINK]
-        items = [i for i in items if i.asset_type != AT_LINK]
-        if args.follow_links and links:
-            have = {i.item_id for i in items}
-            items += [t for t in inv.resolve_links(links) if t.item_id not in have]
-
-        selected = [i for i in items if i.asset_type in wanted_types]
-        allowed = [i for i in selected if may_export(i, session.agent_id)]
-        not_allowed = len(selected) - len(allowed)
+        allowed = [i for i in items if may_export(i, session.agent_id)]
+        not_allowed = len(items) - len(allowed)
         counts = Counter(assets.KINDS_BY_TYPE[i.asset_type].name for i in allowed)
         summary = ", ".join(_count(n, k) for k, n in counts.items()) or "nothing"
         print(f"Found {summary} to download.", file=sys.stderr)

@@ -65,6 +65,12 @@ sl-asset-downloader folders -u "your.name"
 # Only the Photo Album, as JPEG, into a specific folder
 sl-asset-downloader download -u "your.name" -f @photos --format jpg -o ~/sl-photos
 
+# Photos and textures, plus the notecards in your Notecards folder
+sl-asset-downloader download -u "your.name" --notecards
+
+# Notecards from another folder instead of the Notecards folder
+sl-asset-downloader download -u "your.name" --notecards --notecard-folder "Objects/My Build"
+
 # Notecards and sounds from specific folders
 sl-asset-downloader download -u "your.name" -f @notecards -f "Objects/My Build" -t notecard -t sound
 
@@ -81,6 +87,11 @@ sl-asset-downloader download -u "your.name" --dry-run
 - a folder UUID
 - a shortcut for a system folder: `@photos`, `@textures`, `@sounds`,
   `@notecards`, `@scripts`, `@animations`, or `@root`
+
+`--notecards` downloads notecards in addition to whatever `--folder` and
+`--type` select. By default it only takes notecards from the **Notecards**
+folder (and its subfolders). Pass `--notecard-folder` (repeatable, same values
+as `--folder`) to take them from other folders instead.
 
 Subfolders are included unless you pass `--no-recursive`. Inventory links are
 followed by default; `--no-links` turns that off.
